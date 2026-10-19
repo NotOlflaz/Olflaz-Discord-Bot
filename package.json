@@ -2,9 +2,9 @@
   "name": "olflazmc-bot",
   "version": "1.0.0",
   "description": "Discord Bot for the OlflazMC Minecraft YouTube Community",
-  "main": "src/index.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node index.js",
     "deploy": "node src/deploy-commands.js",
     "test": "node test/bot-test.js"
   },
