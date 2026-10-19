@@ -1,0 +1,25 @@
+{
+  "name": "olflazmc-bot",
+  "version": "1.0.0",
+  "description": "Discord Bot for the OlflazMC Minecraft YouTube Community",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "test": "node test/bot-test.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "minecraft",
+    "olflazmc",
+    "discordjs"
+  ],
+  "author": "OlflazMC",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.7",
+    "ms": "^2.1.3"
+  }
+}
