@@ -135,9 +135,43 @@ db.exec(`
     reason TEXT,
     created_at INTEGER
   );
+
+  CREATE TABLE IF NOT EXISTS sticky_messages (
+    channel_id TEXT PRIMARY KEY,
+    guild_id TEXT,
+    content TEXT,
+    embed_title TEXT,
+    embed_description TEXT,
+    embed_color TEXT,
+    last_message_id TEXT,
+    is_active INTEGER DEFAULT 1,
+    updated_at INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS user_activity (
+    user_id TEXT,
+    guild_id TEXT,
+    message_count INTEGER DEFAULT 0,
+    weekly_points INTEGER DEFAULT 0,
+    suggestions_accepted INTEGER DEFAULT 0,
+    last_active INTEGER,
+    updated_at INTEGER,
+    PRIMARY KEY (user_id, guild_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS application_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_id INTEGER,
+    action TEXT,
+    actor_id TEXT,
+    actor_tag TEXT,
+    notes TEXT,
+    created_at INTEGER
+  );
 `);
 
 logger.info(`SQLite Database initialized at ${dbPath}`);
+
 
 // -----------------------------------------------------------------
 // Key-Value Settings
@@ -440,6 +474,104 @@ function clearUserWarnings(guildId, userId) {
   return db.prepare('DELETE FROM warnings WHERE guild_id = ? AND user_id = ?').run(guildId, userId);
 }
 
+// -----------------------------------------------------------------
+// Sticky Messages
+// -----------------------------------------------------------------
+function getStickyMessage(channelId) {
+  return db.prepare('SELECT * FROM sticky_messages WHERE channel_id = ? AND is_active = 1').get(channelId);
+}
+
+function setStickyMessage({ channelId, guildId, content = '', embedTitle = '', embedDescription = '', embedColor = '', lastMessageId = null, isActive = 1 }) {
+  const stmt = db.prepare(`
+    INSERT INTO sticky_messages (channel_id, guild_id, content, embed_title, embed_description, embed_color, last_message_id, is_active, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(channel_id) DO UPDATE SET
+      content = excluded.content,
+      embed_title = excluded.embed_title,
+      embed_description = excluded.embed_description,
+      embed_color = excluded.embed_color,
+      last_message_id = excluded.last_message_id,
+      is_active = excluded.is_active,
+      updated_at = excluded.updated_at
+  `);
+  stmt.run(channelId, guildId, content, embedTitle, embedDescription, embedColor, lastMessageId, isActive ? 1 : 0, Date.now());
+}
+
+function updateStickyLastMessage(channelId, lastMessageId) {
+  db.prepare('UPDATE sticky_messages SET last_message_id = ?, updated_at = ? WHERE channel_id = ?').run(lastMessageId, Date.now(), channelId);
+}
+
+function deleteStickyMessage(channelId) {
+  return db.prepare('DELETE FROM sticky_messages WHERE channel_id = ?').run(channelId);
+}
+
+function getAllActiveStickyMessages(guildId) {
+  return db.prepare('SELECT * FROM sticky_messages WHERE guild_id = ? AND is_active = 1').all(guildId);
+}
+
+// -----------------------------------------------------------------
+// Real Verified Activity Leaderboard
+// -----------------------------------------------------------------
+function recordUserActivity(userId, guildId, pointsToAdd = 1) {
+  const stmt = db.prepare(`
+    INSERT INTO user_activity (user_id, guild_id, message_count, weekly_points, suggestions_accepted, last_active, updated_at)
+    VALUES (?, ?, 1, ?, 0, ?, ?)
+    ON CONFLICT(user_id, guild_id) DO UPDATE SET
+      message_count = user_activity.message_count + 1,
+      weekly_points = user_activity.weekly_points + excluded.weekly_points,
+      last_active = excluded.last_active,
+      updated_at = excluded.updated_at
+  `);
+  const now = Date.now();
+  stmt.run(userId, guildId, pointsToAdd, now, now);
+}
+
+function recordSuggestionAccepted(userId, guildId) {
+  const stmt = db.prepare(`
+    INSERT INTO user_activity (user_id, guild_id, message_count, weekly_points, suggestions_accepted, last_active, updated_at)
+    VALUES (?, ?, 0, 5, 1, ?, ?)
+    ON CONFLICT(user_id, guild_id) DO UPDATE SET
+      weekly_points = user_activity.weekly_points + 5,
+      suggestions_accepted = user_activity.suggestions_accepted + 1,
+      last_active = excluded.last_active,
+      updated_at = excluded.updated_at
+  `);
+  const now = Date.now();
+  stmt.run(userId, guildId, now, now);
+}
+
+function getUserActivity(userId, guildId) {
+  return db.prepare('SELECT * FROM user_activity WHERE user_id = ? AND guild_id = ?').get(userId, guildId);
+}
+
+function getTopActivityLeaderboard(guildId, limit = 10) {
+  return db.prepare(`
+    SELECT * FROM user_activity 
+    WHERE guild_id = ? AND weekly_points > 0
+    ORDER BY weekly_points DESC, message_count DESC 
+    LIMIT ?
+  `).all(guildId, limit);
+}
+
+function resetWeeklyActivity(guildId) {
+  return db.prepare('UPDATE user_activity SET weekly_points = 0, updated_at = ? WHERE guild_id = ?').run(Date.now(), guildId);
+}
+
+// -----------------------------------------------------------------
+// Application Audit Trail
+// -----------------------------------------------------------------
+function addApplicationAudit({ appId, action, actorId, actorTag, notes = '' }) {
+  const stmt = db.prepare(`
+    INSERT INTO application_audit (app_id, action, actor_id, actor_tag, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  return stmt.run(appId, action, actorId, actorTag, notes, Date.now()).lastInsertRowid;
+}
+
+function getApplicationAudits(appId) {
+  return db.prepare('SELECT * FROM application_audit WHERE app_id = ? ORDER BY created_at ASC').all(appId);
+}
+
 module.exports = {
   db,
   getSetting,
@@ -478,5 +610,18 @@ module.exports = {
   cancelEvent,
   addWarning,
   getUserWarnings,
-  clearUserWarnings
+  clearUserWarnings,
+  getStickyMessage,
+  setStickyMessage,
+  updateStickyLastMessage,
+  deleteStickyMessage,
+  getAllActiveStickyMessages,
+  recordUserActivity,
+  recordSuggestionAccepted,
+  getUserActivity,
+  getTopActivityLeaderboard,
+  resetWeeklyActivity,
+  addApplicationAudit,
+  getApplicationAudits
 };
+

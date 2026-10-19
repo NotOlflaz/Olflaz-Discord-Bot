@@ -178,13 +178,13 @@ Configure the following variables in your `.env` file (see `.env.example`):
 ## 🚀 Deployment & Startup Instructions
 
 ### 1. Run Automated Test Suite
-Verify that all 16 systems and configurations pass offline:
+Verify that all 32 systems and configurations pass offline:
 ```powershell
 node test/bot-test.js
 ```
 
 ### 2. Deploy Slash Commands to Discord
-Registers all 14 slash commands instantly to your guild and globally:
+Registers all slash commands instantly to your guild and globally:
 ```powershell
 node src/deploy-commands.js
 ```
@@ -192,8 +192,49 @@ node src/deploy-commands.js
 ### 3. Start the Bot
 Launch the live bot process:
 ```powershell
-node src/index.js
+node index.js
 ```
+*(On hosting panels like bothosting.com, the container runs `node index.js` automatically)*.
+
+---
+
+## 🔑 Required Discord Developer Portal Settings
+
+For the bot to function with full capabilities, ensure the following are enabled in the **[Discord Developer Portal](https://discord.com/developers/applications)**:
+1. Navigate to **Applications** ➔ **Your Bot Application** ➔ **Bot** tab.
+2. Under **Privileged Gateway Intents**, enable:
+   - ✅ **Server Members Intent** *(REQUIRED for Welcome messages, auto-assigning @Member role, and member caching)*
+   - ✅ **Message Content Intent** *(REQUIRED for Anti-Spam inspection, message edit/delete audit logs, and sticky message detection)*
+3. Save changes.
+
+---
+
+## 📋 Complete Slash Command Reference
+
+| Command | Subcommands / Options | Permissions Required | Purpose |
+| :--- | :--- | :--- | :--- |
+| `/setup` | `preview:True/False` | Administrator | Simulates or applies complete 17-role hierarchy, categories, and channels |
+| `/apply` | *(Opens modal)* | Everyone | Dedicated creator application modal for YouTuber / YouTuber+ team |
+| `/sticky` | `set`, `remove`, `list`, `preview` | Manage Messages | Creates, updates, or lists persistent sticky notices in designated channels |
+| `/youtube` | `status`, `check`, `set-channel`, `set-destination` | Manage Messages / Admin | Monitors @OlflazMC YouTube uploads & tests live announcements |
+| `/leaderboard` | `view`, `post`, `reset` | Everyone (View) / Staff (Manage) | Real, verified community activity and suggestion ranking system |
+| `/welcometest` | `target`, `send_to_channel` | Manage Guild | Simulates and previews the official welcome card for a member |
+| `/diagnostics` | *(None)* | Manage Guild | Runs comprehensive system health check, channel audit, and DB counts |
+| `/ticket` | `open`, `close` | Everyone | Opens or closes support tickets |
+| `/warn` | `target`, `reason` | Moderate Members | Issues a formal warning and logs to `#mod-logs` |
+| `/warnings` | `view`, `clear` | Moderate Members | Views or clears a member's warning history |
+| `/timeout` | `target`, `duration`, `reason` | Moderate Members | Times out a member for a specified duration |
+| `/untimeout` | `target`, `reason` | Moderate Members | Removes an active timeout from a member |
+| `/kick` | `target`, `reason` | Kick Members | Kicks a member from the server |
+| `/ban` | `target`, `reason`, `delete_messages` | Ban Members | Permanently bans a member from the server |
+| `/clear` | `amount`, `target` | Manage Messages | Bulk deletes messages in a channel |
+| `/giveaway` | `create`, `reroll`, `end` | Manage Messages | Manages community giveaways with persistent timers |
+| `/event` | `create`, `list`, `cancel` | Manage Messages | Schedules community events with attendee RSVPs |
+| `/roles-panel` | *(None)* | Manage Roles | Posts interactive button panel for 5 self-assignable ping roles |
+| `/ticket-panel`| *(None)* | Manage Channels | Posts ticket creation launcher panel |
+| `/ping` | *(None)* | Everyone | Checks bot latency and Discord API heartbeat |
+| `/serverinfo` | *(None)* | Everyone | Displays server statistics and member breakdown |
+| `/help` | *(None)* | Everyone | Shows interactive command catalog |
 
 ---
 
@@ -201,30 +242,33 @@ node src/index.js
 
 Once the bot is online, verify each feature in your server:
 
-1. **Server Setup**:
+1. **System Health Check**:
+   - Run `/diagnostics` in your staff channel. Confirm that database is connected and channel mappings are green.
+2. **Server Setup**:
    - Run `/setup preview:True` in your staff channel. Verify the dry-run report displays the complete 17 roles, categories, and channels.
    - Run `/setup preview:False`. Confirm channels are organized and starter embeds appear in rules, announcements, roles, and tickets.
-2. **Self-Role Panel**:
-   - In `🎭・choose-roles`, click `⚔️ PvP` or `🎮 Minecraft`. Check that the role is granted in your user profile. Click again to verify removal.
-3. **Tickets**:
-   - Go to `🎫・open-a-ticket` and click `🛠️ Support`. Confirm a private `#ticket-xxxx` channel opens.
-   - Click `Claim Ticket`. Confirm the claim status updates.
-   - Click `Close Ticket` and confirm. Confirm the channel closes, the transcript is saved, and a log appears in `🎫・ticket-logs`.
-4. **Creator Applications**:
-   - In `🎫・open-a-ticket`, click `🎥 Creator Apply`. Fill in channel details and submit.
-   - Verify the application embed appears in `📝・applications-review`.
-   - As staff, click `Accept Application` and confirm your decision is logged and the applicant receives a DM.
-5. **Suggestions**:
-   - In `💡・suggestions`, click `Submit Suggestion`. Fill out the modal.
-   - Click `🟢` to upvote. Verify counter increments to 1. Click `🔴` and verify counter switches to 1 downvote, 0 upvotes.
-6. **Giveaways**:
-   - Run `/giveaway create prize:"VIP Rank" duration:"1m" winners:1`.
-   - Click `🎟️ Enter Giveaway`. Verify entry count updates.
-   - Wait 1 minute. Verify winner is announced and button disables automatically.
-7. **Events**:
-   - Run `/event create title:"BuildUHC Tournament" description:"1.8 rod PvP" time:"2026-10-25 18:00 UTC" location:"mc.olflazmc.net"`.
-   - Click `RSVP / Register`. Confirm attendee count increments.
-8. **Moderation**:
-   - Run `/warn target:@Member reason:"Test warning"`. Verify embed posts and warning increments.
-   - Run `/warnings view target:@Member` to review history.
-   - Run `/warnings clear target:@Member` to clear warnings.
+3. **Sticky Messages**:
+   - Run `/sticky preview title:"PvP Chat Rules" description:"No toxicity or combat logging."`.
+   - Run `/sticky set channel:#pvp-chat title:"PvP Chat Rules" description:"No toxicity or combat logging."`.
+   - Send chat messages in `#pvp-chat` and verify the notice stays at the bottom without spamming.
+4. **Welcome System**:
+   - Run `/welcometest` to preview your own dynamic welcome embed with rules button link.
+5. **Creator Applications**:
+   - Run `/apply` or click `🎥 Creator Apply` in `#open-a-ticket`.
+   - Fill out the 5-field modal (platform, channel link, focus, stats, reason) and submit.
+   - Verify a private application channel is opened under `「📝」𝗖𝗥𝗘𝗔𝗧𝗢𝗥 𝗔𝗣𝗣𝗟𝗜𝗖𝗔𝗧𝗜𝗢𝗡𝗦`.
+   - Verify the review embed appears in `📝・applications-review` with Accept, Reject, Request Info, and Add Note buttons.
+6. **YouTube Announcements**:
+   - Run `/youtube status` to verify `@OlflazMC` channel ID (`UCl4u_M9jzMV14y-TfrJ0-aQ`) and `#new-videos` destination.
+   - Run `/youtube check` to poll the live RSS feed.
+7. **Leaderboard System**:
+   - Run `/leaderboard view` to verify genuine community activity rankings.
+   - Run `/leaderboard post` to sync the embed in place in `#leaderboards`.
+8. **Tickets & Logs**:
+   - Open a ticket in `#open-a-ticket`. Verify an `opened` log appears in `🎫・ticket-logs`.
+   - Claim the ticket. Verify a `claimed` log appears in `🎫・ticket-logs`.
+   - Close the ticket. Verify the HTML transcript is archived and delivered to `🎫・ticket-logs`.
+9. **Moderation Logs**:
+   - Run `/warn target:@Member reason:"Test warning"`. Verify log embed appears in `📋・mod-logs`.
+   - Delete or edit a message and verify automated logging in `📋・mod-logs`.
+

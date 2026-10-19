@@ -13,6 +13,8 @@ const config = require('../config');
 const theme = require('./theme');
 const logger = require('./logger');
 const db = require('./database');
+const { logTicketEvent, getTicketLogsChannel } = require('./modLogger');
+
 
 // Ensure transcripts directory exists
 const transcriptsDir = path.join(__dirname, '../../data/transcripts');
@@ -300,6 +302,14 @@ async function createTicketChannel({ guild, member, ticketType }) {
     components: [controlsRow]
   });
 
+  // 7. Log ticket opened event to #ticket-logs
+  await logTicketEvent(guild, {
+    event: 'opened',
+    ticket: { ticket_number: ticketNumber, ticket_type: ticketType, user_id: member.id, user_tag: member.user.tag, created_at: Date.now() },
+    channel: ticketChannel,
+    actor: member
+  });
+
   logger.info(`Created ticket channel #${channelName} (ID: ${ticketId}) for ${member.user.tag}`);
   return { channel: ticketChannel, ticketId, ticketNumber };
 }
@@ -433,6 +443,14 @@ async function handleTicketClaim(interaction, ticketId) {
     content: `📌 <@${member.id}> has claimed this ticket and will be assisting you!`
   });
 
+  // Log ticket claimed event to #ticket-logs
+  await logTicketEvent(interaction.guild, {
+    event: 'claimed',
+    ticket: { ...ticket, claimed_by_id: member.id, claimed_by_tag: member.user.tag },
+    channel: interaction.channel,
+    actor: member
+  });
+
   logger.info(`Ticket #${ticket.ticket_number} claimed by ${member.user.tag}`);
 }
 
@@ -516,51 +534,58 @@ async function handleTicketCloseConfirm(interaction, ticketId) {
       content: '🔒 **Closing ticket:** Generating private HTML transcript and archiving logs...'
     });
 
-    // 1. Generate Transcript
+    // 1. Generate Transcript with safe fallback
     ticket.closed_by_id = member.id;
     ticket.closed_by_tag = member.user.tag;
-    const { filePath, fileName } = await generateHtmlTranscript(channel, ticket);
+    let transcriptResult = null;
+    let transcriptError = null;
 
-    // 2. Update Database Record
-    db.closeTicket(ticketId, member.id, member.user.tag, 'Resolved', filePath);
-
-    // 3. Post Closure Summary to ticket-logs
-    const ticketLogsChannel = guild.channels.cache.find(
-      c => (c.name === '🎫・ticket-logs' || c.name === 'ticket-logs') && c.isTextBased()
-    );
-
-    if (ticketLogsChannel) {
-      const logEmbed = new EmbedBuilder()
-        .setTitle(`🎫 Ticket Closed — #${String(ticket.ticket_number).padStart(4, '0')}`)
-        .setColor(theme.colors.danger)
-        .addFields(
-          { name: '🏷️ Type', value: `\`${ticket.ticket_type}\``, inline: true },
-          { name: '👤 Requester', value: `<@${ticket.user_id}> (${ticket.user_tag})`, inline: true },
-          { name: '🔒 Closed By', value: `<@${member.id}> (${member.user.tag})`, inline: true },
-          { name: '📌 Claimed By', value: ticket.claimed_by_id ? `<@${ticket.claimed_by_id}>` : '`Unclaimed`', inline: true },
-          { name: '⏱️ Duration', value: `<t:${Math.floor(ticket.created_at / 1000)}:R>`, inline: true }
-        )
-        .setFooter({ text: theme.footers.tickets })
-        .setTimestamp();
-
-      const attachment = new AttachmentBuilder(filePath, { name: fileName });
-      await ticketLogsChannel.send({ embeds: [logEmbed], files: [attachment] }).catch(err => {
-        logger.warn(`Could not send transcript to ticket-logs: ${err.message}`);
-      });
+    try {
+      transcriptResult = await generateHtmlTranscript(channel, ticket);
+    } catch (tErr) {
+      transcriptError = tErr.message;
+      logger.warn(`Could not generate transcript for ticket #${ticket.ticket_number}: ${tErr.message}`);
     }
 
-    // 4. Send DM to requester with transcript
+    const filePath = transcriptResult?.filePath || null;
+    const fileName = transcriptResult?.fileName || null;
+    const hasValidFile = filePath && fs.existsSync(filePath);
+
+    // 2. Update Database Record
+    db.closeTicket(
+      ticketId,
+      member.id,
+      member.user.tag,
+      transcriptError ? `Resolved (Transcript error: ${transcriptError})` : 'Resolved',
+      hasValidFile ? filePath : null
+    );
+
+    // 3. Post Closure Summary & Transcript to ticket-logs
+    const logFiles = hasValidFile ? [new AttachmentBuilder(filePath, { name: fileName })] : [];
+    await logTicketEvent(guild, {
+      event: 'closed',
+      ticket,
+      channel,
+      actor: member,
+      reason: transcriptError ? `Resolved (Transcript generation failed: ${transcriptError})` : 'Resolved',
+      files: logFiles
+    });
+
+    // 4. Send DM to requester with transcript if available
     try {
       const requester = await guild.client.users.fetch(ticket.user_id).catch(() => null);
       if (requester) {
         const dmEmbed = new EmbedBuilder()
           .setTitle(`🎫 Ticket #${String(ticket.ticket_number).padStart(4, '0')} Closed`)
           .setColor(theme.colors.primary)
-          .setDescription(`Your support ticket in **${guild.name}** has been resolved and closed by **${member.user.tag}**. An archived HTML transcript of your ticket is attached below.`)
+          .setDescription(
+            `Your support ticket in **${guild.name}** has been resolved and closed by **${member.user.tag}**.\n` +
+            (hasValidFile ? 'An archived HTML transcript of your ticket is attached below.' : '*(Transcript could not be archived)*')
+          )
           .setTimestamp();
 
-        const dmAttachment = new AttachmentBuilder(filePath, { name: fileName });
-        await requester.send({ embeds: [dmEmbed], files: [dmAttachment] }).catch(() => {});
+        const dmFiles = hasValidFile ? [new AttachmentBuilder(filePath, { name: fileName })] : [];
+        await requester.send({ embeds: [dmEmbed], files: dmFiles }).catch(() => {});
       }
     } catch {}
 

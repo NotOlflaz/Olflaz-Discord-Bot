@@ -128,6 +128,21 @@ module.exports = {
         if (interaction.customId === 'modal_submit_video_idea') {
           return await communityFeatures.handleVideoIdeaSubmit(interaction);
         }
+
+        if (interaction.customId.startsWith('modal_app_info_')) {
+          const appId = interaction.customId.replace('modal_app_info_', '');
+          return await applicationManager.handleApplicationInfoModal(interaction, appId);
+        }
+
+        if (interaction.customId.startsWith('modal_app_reject_')) {
+          const appId = interaction.customId.replace('modal_app_reject_', '');
+          return await applicationManager.handleApplicationRejectModal(interaction, appId);
+        }
+
+        if (interaction.customId.startsWith('modal_app_note_')) {
+          const appId = interaction.customId.replace('modal_app_note_', '');
+          return await applicationManager.handleApplicationNoteModal(interaction, appId);
+        }
       } catch (modalErr) {
         if (modalErr.code === 10062) return;
         logger.error(`Error handling modal submission ${interaction.customId}: ${modalErr.message}`);
@@ -227,6 +242,16 @@ module.exports = {
         if (customId.startsWith('app_reject_')) {
           const appId = customId.replace('app_reject_', '');
           return await applicationManager.handleApplicationAction(interaction, 'reject', appId);
+        }
+
+        if (customId.startsWith('app_info_')) {
+          const appId = customId.replace('app_info_', '');
+          return await applicationManager.handleApplicationAction(interaction, 'info', appId);
+        }
+
+        if (customId.startsWith('app_note_')) {
+          const appId = customId.replace('app_note_', '');
+          return await applicationManager.handleApplicationAction(interaction, 'note', appId);
         }
 
         // --- 4.7 Suggestion Voting & Staff Controls ---

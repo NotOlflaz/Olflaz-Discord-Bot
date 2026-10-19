@@ -1013,8 +1013,25 @@ module.exports = {
               logger.info(`Synchronized channel: #${chDef.name}`);
             }
 
-            // Ensure bot has explicit permission if it is in a staff category
+            // Audit and align permissions for existing channels (least-privilege policy)
+            if (chDef.readOnly && typeof channel.isTextBased === 'function' && channel.isTextBased()) {
+              const everyonePerms = channel.permissionsFor(guild.roles.everyone);
+              if (everyonePerms && everyonePerms.has(PermissionFlagsBits.SendMessages)) {
+                await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
+                  SendMessages: false,
+                  AddReactions: false
+                }).catch(() => {});
+              }
+            }
+
             if (catDef.isStaffOnly) {
+              const everyonePerms = channel.permissionsFor(guild.roles.everyone);
+              if (!everyonePerms || everyonePerms.has(PermissionFlagsBits.ViewChannel)) {
+                await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
+                  ViewChannel: false
+                }).catch(() => {});
+              }
+
               const currentBotPerms = channel.permissionsFor(botMember);
               if (!currentBotPerms || !currentBotPerms.has(PermissionFlagsBits.ViewChannel)) {
                 await channel.permissionOverwrites.edit(botMember.id, {

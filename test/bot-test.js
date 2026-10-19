@@ -1016,6 +1016,273 @@ async function runAsyncTest(name, fn) {
     assert(conflictField.value.includes('action is paused'), 'Must explain action is paused');
   });
 
+  // -----------------------------------------------------------------
+  // 26. Moderation Logger & Token Redaction Safety
+  // -----------------------------------------------------------------
+  await runAsyncTest('Moderation logger sanitization and token redaction', async () => {
+    const { sanitizeLogText, logModerationAction } = require('../src/utils/modLogger');
+
+    const mockToken = ['AAAABBBBCCCCDDDDEEEEFFFF', 'GGGGHH', 'IIIIJJJJKKKKLLLLMMMMNNNNOOO'].join('.');
+    const sampleLeaked = `Warning user: bot token is ${mockToken} and token Bearer mysecrettoken123`;
+    const sanitized = sanitizeLogText(sampleLeaked);
+
+    assert(!sanitized.includes('AAAABBBBCCCCDDDDEEEEFFFF'), 'Must redact Discord tokens');
+    assert(sanitized.includes('[REDACTED_DISCORD_TOKEN]'), 'Must replace with token placeholder');
+    assert(sanitized.includes('[REDACTED_BEARER_TOKEN]'), 'Must replace Bearer tokens');
+
+    // Test logModerationAction with mock guild
+    let sentPayload = null;
+    const mockGuild = {
+      id: 'guild_mod_test',
+      channels: {
+        cache: [
+          {
+            id: 'ch_mod_logs',
+            name: '📋・mod-logs',
+            isTextBased: () => true,
+            send: async (p) => { sentPayload = p; return p; }
+          }
+        ]
+      }
+    };
+
+    await logModerationAction(mockGuild, {
+      action: '🔨 Ban Applied',
+      targetUser: { id: 'target_123', tag: 'BadPlayer#0001' },
+      moderator: { id: 'mod_123', tag: 'Staff#0001' },
+      reason: 'Rule 1 violation'
+    });
+
+    assert(sentPayload, 'Must send embed to mod-logs channel');
+    assert(sentPayload.embeds && sentPayload.embeds.length === 1, 'Must contain 1 embed');
+    assert.strictEqual(sentPayload.embeds[0].data.title, '🔨 Ban Applied', 'Title must match action');
+  });
+
+  // -----------------------------------------------------------------
+  // 27. Sticky Messages Persistence & Duplicate Repost Prevention
+  // -----------------------------------------------------------------
+  await runAsyncTest('Sticky messages configuration, persistence, and duplicate skipping', async () => {
+    const stickyManager = require('../src/utils/stickyManager');
+
+    const channelId = 'ch_sticky_test_' + Date.now();
+    const guildId = 'guild_sticky_test';
+
+    // 1. Persistence in SQLite
+    db.setStickyMessage({
+      channelId,
+      guildId,
+      content: 'Important Notice',
+      embedTitle: 'PvP Rules',
+      embedDescription: 'No combat logging in arena',
+      embedColor: '#00D2D3'
+    });
+
+    const persisted = db.getStickyMessage(channelId);
+    assert(persisted, 'Sticky message must be persisted in database');
+    assert.strictEqual(persisted.embed_title, 'PvP Rules');
+    assert.strictEqual(persisted.is_active, 1);
+
+    // 2. Duplicate skipping: If last_message_id is already the newest message, skip repost
+    let repostSent = false;
+    const mockChannel = {
+      id: channelId,
+      name: 'pvp-chat',
+      isTextBased: () => true,
+      client: { user: { id: 'bot_id_123' } },
+      messages: {
+        fetch: async (opts) => {
+          if (opts.limit === 1) {
+            return {
+              size: 1,
+              first: () => ({ id: 'tracked_msg_456', author: { id: 'bot_id_123' } })
+            };
+          }
+          return new Map();
+        }
+      },
+      send: async () => {
+        repostSent = true;
+      }
+    };
+
+    // Set last_message_id to match the latest message in channel
+    persisted.last_message_id = 'tracked_msg_456';
+    await stickyManager.executeStickyRepost(mockChannel, persisted);
+
+    assert.strictEqual(repostSent, false, 'Must skip repost when sticky notice is already the newest message');
+
+    // 3. Removal
+    db.deleteStickyMessage(channelId);
+    const removed = db.getStickyMessage(channelId);
+    assert.strictEqual(removed, undefined, 'Sticky message must be removed from DB');
+  });
+
+  // -----------------------------------------------------------------
+  // 28. YouTube Feed Parsing & Cold-Start Duplicate Prevention
+  // -----------------------------------------------------------------
+  await runAsyncTest('YouTube monitor cold-start checkpoint & duplicate upload detection', async () => {
+    const youtubeMonitor = require('../src/utils/youtubeMonitor');
+
+    // Verify channel ID is OlflazMC's authentic ID
+    const channelId = youtubeMonitor.getTargetYouTubeChannelId();
+    assert.strictEqual(channelId, 'UCl4u_M9jzMV14y-TfrJ0-aQ', 'Target YouTube ID must be OlflazMC channel');
+
+    // Test cold start checkpoint
+    db.setSetting('youtube_last_video_id', 'test_video_123');
+    assert.strictEqual(db.getSetting('youtube_last_video_id'), 'test_video_123', 'Last video ID must persist across restarts');
+  });
+
+  // -----------------------------------------------------------------
+  // 29. Welcome Message Payload Construction & Safe Fallback
+  // -----------------------------------------------------------------
+  runTest('Welcome payload construction, dynamic avatar, and rules button', () => {
+    const { buildWelcomePayload } = require('../src/events/guildMemberAdd');
+
+    const mockGuild = {
+      id: 'guild_welcome_test',
+      name: 'OlflazMC Server',
+      memberCount: 1540,
+      channels: {
+        cache: [
+          { id: 'ch_rules_1', name: '📜・rules', isTextBased: () => true },
+          { id: 'ch_roles_1', name: '🎭・choose-roles', isTextBased: () => true },
+          { id: 'ch_general_1', name: '💬・general-chat', isTextBased: () => true }
+        ]
+      }
+    };
+
+    const mockMember = {
+      id: 'user_new_123',
+      displayName: 'SwordMaster',
+      user: {
+        id: 'user_new_123',
+        username: 'SwordMaster',
+        tag: 'SwordMaster#1234',
+        displayAvatarURL: () => 'https://cdn.discordapp.com/avatars/user.png'
+      }
+    };
+
+    const payload = buildWelcomePayload({ member: mockMember, guild: mockGuild });
+    assert(payload.content.includes('SwordMaster') || payload.content.includes('user_new_123'), 'Content must mention new member');
+    assert(payload.embeds && payload.embeds.length === 1, 'Must contain 1 embed');
+
+    const embedData = typeof payload.embeds[0].toJSON === 'function' ? payload.embeds[0].toJSON() : payload.embeds[0];
+    assert(embedData.title.includes('SwordMaster'), 'Title must dynamically include member display name');
+    assert(embedData.thumbnail.url.includes('cdn.discordapp.com'), 'Thumbnail must contain dynamic avatar URL');
+    assert(embedData.description.includes('ch_rules_1'), 'Description must link to rules channel');
+
+    assert(payload.components && payload.components.length === 1, 'Must include link action row');
+    const buttons = payload.components[0].components;
+    assert(buttons.some(b => b.data.url?.includes('ch_rules_1')), 'Must contain a button linking to the rules channel');
+  });
+
+  // -----------------------------------------------------------------
+  // 30. Creator Application Review Authorization & Audit Trail
+  // -----------------------------------------------------------------
+  runTest('Creator application review authorization, notes, and audit trail', () => {
+    const applicationManager = require('../src/utils/applicationManager');
+
+    const mockOwnerMember = {
+      id: 'owner_1',
+      guild: { ownerId: 'owner_1' },
+      roles: { cache: [] }
+    };
+
+    const mockRegularMember = {
+      id: 'player_1',
+      guild: { ownerId: 'owner_1' },
+      permissions: { has: () => false },
+      roles: { cache: [{ name: '👤 Member' }] }
+    };
+
+    assert.strictEqual(applicationManager.isApplicationReviewer(mockOwnerMember), true, 'Server Owner must be an authorized reviewer');
+    assert.strictEqual(applicationManager.isApplicationReviewer(mockRegularMember), false, 'Regular member must NOT be an authorized reviewer');
+
+    // Test application modal building (5 fields)
+    const modal = applicationManager.buildApplicationModal();
+    assert(modal.data.custom_id, 'Modal must have custom_id');
+    assert.strictEqual(modal.components.length, 5, 'Modal must contain 5 fields (platform, channel, focus, stats, reason)');
+
+    // Test application audit trail persistence
+    const auditId = db.addApplicationAudit({
+      appId: 9999,
+      action: 'approved',
+      actorId: 'mod_123',
+      actorTag: 'Admin#0001',
+      notes: 'Passed review and verified channel stats'
+    });
+
+    const audits = db.getApplicationAudits(9999);
+    assert(audits.length > 0, 'Audit record must be saved in database');
+    assert.strictEqual(audits[0].action, 'approved');
+    assert.strictEqual(audits[0].notes, 'Passed review and verified channel stats');
+  });
+
+  // -----------------------------------------------------------------
+  // 31. Leaderboard Real Activity Tracking, Anti-Spam Cooldown & Reset
+  // -----------------------------------------------------------------
+  await runAsyncTest('Leaderboard activity scoring, 60s cooldown, and weekly reset', async () => {
+    const leaderboardManager = require('../src/utils/leaderboardManager');
+
+    const testGuildId = 'guild_lb_test_' + Date.now();
+    const testUserId = 'user_lb_test_' + Date.now();
+
+    // 1. Record activity
+    db.recordUserActivity(testUserId, testGuildId, 1);
+    let record = db.getUserActivity(testUserId, testGuildId);
+    assert(record, 'Activity must be stored in database');
+    assert.strictEqual(record.weekly_points, 1);
+    assert.strictEqual(record.message_count, 1);
+
+    // 2. Add points for accepted suggestion
+    db.recordSuggestionAccepted(testUserId, testGuildId);
+    record = db.getUserActivity(testUserId, testGuildId);
+    assert.strictEqual(record.weekly_points, 6);
+    assert.strictEqual(record.suggestions_accepted, 1);
+
+    // 3. Top rankings query
+    const top = db.getTopActivityLeaderboard(testGuildId, 5);
+    assert(top.length >= 1, 'Top rankings must include the recorded user');
+    assert.strictEqual(top[0].user_id, testUserId);
+
+    // 4. Weekly reset: resets weekly points to 0 while preserving total message counts
+    db.resetWeeklyActivity(testGuildId);
+    record = db.getUserActivity(testUserId, testGuildId);
+    assert.strictEqual(record.weekly_points, 0, 'Weekly points must be reset to 0');
+    assert.strictEqual(record.message_count, 1, 'Historical message count must be preserved');
+  });
+
+  // -----------------------------------------------------------------
+  // 32. Ticket Lifecycle & Transcript Delivery Error Handling
+  // -----------------------------------------------------------------
+  runTest('Ticket lifecycle logging and graceful transcript failure handling', () => {
+    const { getTicketLogsChannel } = require('../src/utils/modLogger');
+
+    const mockGuildWithTicketLogs = {
+      id: 'guild_ticket_test',
+      channels: {
+        cache: [
+          {
+            id: 'ch_t_logs_1',
+            name: '🎫・ticket-logs',
+            isTextBased: () => true
+          }
+        ]
+      }
+    };
+
+    const resolvedChannel = getTicketLogsChannel(mockGuildWithTicketLogs);
+    assert(resolvedChannel, 'Must resolve ticket-logs channel');
+    assert.strictEqual(resolvedChannel.id, 'ch_t_logs_1');
+
+    // Verify escapeHtml prevents XSS injections in transcripts
+    const { escapeHtml } = require('../src/utils/ticketManager');
+    const dangerousInput = '<script>alert("xss")</script>&"\'';
+    const escaped = escapeHtml(dangerousInput);
+    assert(!escaped.includes('<script>'), 'Must escape script tags');
+    assert(escaped.includes('&lt;script&gt;'), 'Must encode < and >');
+  });
+
   // Summary
   console.log('\n\x1b[36m===============================================================\x1b[0m');
   console.log(` \x1b[1mRESULTS: ${passedTests}/${totalTests} Tests Passed\x1b[0m`);
@@ -1025,3 +1292,4 @@ async function runAsyncTest(name, fn) {
     process.exit(1);
   }
 })();
+

@@ -156,9 +156,8 @@ async function punishSpammer(message, reason) {
  */
 async function sendModLog(guild, { action, target, reason, actionTaken, moderator = 'OlflazMC Anti-Spam', color }) {
   try {
-    const modLogChannel = guild.channels.cache.find(
-      c => (c.name.includes('mod-logs') || c.name === 'mod-logs') && c.isTextBased()
-    );
+    const { getModLogsChannel } = require('./modLogger');
+    const modLogChannel = getModLogsChannel(guild);
 
     if (!modLogChannel) return;
 
